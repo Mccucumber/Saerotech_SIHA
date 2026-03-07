@@ -12,3 +12,7 @@ __pycache__/
 
 # Other environment specifics
 .env
+telemetri.json
+
+# ROS Logs
+log/

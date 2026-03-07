@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="tr">
+
+<head>
+    <meta charset="UTF-8">
+    <title>SAEROTECH - Yer Kontrol İstasyonu</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --green: #00ff88;
+            --red: #ff4d4d;
+        }
+
+        body {
+            margin: 0;
+            display: flex;
+            background: var(--bg);
+            color: #f8fafc;
+            font-family: 'Segoe UI', sans-serif;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        #login-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.98);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            backdrop-filter: blur(10px);
+        }
+
+        .login-box {
+            background: var(--panel);
+            padding: 40px;
+            border-radius: 20px;
+            border: 1px solid var(--green);
+            text-align: center;
+            width: 350px;
+        }
+
+        #sidebar {
+            width: 320px;
+            background: var(--panel);
+            padding: 20px;
+            border-right: 1px solid #334155;
+        }
+
+        .stat-card {
+            background: #334155;
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 12px;
+            border-left: 4px solid var(--green);
+        }
+
+        .hss-alert {
+            border-left-color: var(--red);
+            background: #450a0a;
+            animation: blink 1s infinite;
+        }
+
+        #progress-container {
+            background: #0f172a;
+            height: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        #progress-bar {
+            width: 0%;
+            height: 100%;
+            background: var(--green);
+            transition: width 0.1s;
+        }
+
+        #map {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        #top-bar {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            z-index: 1000;
+            background: rgba(15, 23, 42, 0.9);
+            padding: 10px 20px;
+            border-radius: 30px;
+            color: var(--green);
+            border: 1px solid #475569;
+        }
+
+        @keyframes blink {
+            50% {
+                opacity: 0.6;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="login-modal">
+        <div class="login-box">
+            <h2 style="color: var(--green);">SAEROTECH GCS</h2>
+            <input type="text" id="u" placeholder="Kullanıcı Adı" style="width:80%; padding:10px; margin-bottom:10px;">
+            <input type="password" id="p" placeholder="Şifre" style="width:80%; padding:10px; margin-bottom:10px;">
+            <button onclick="login()"
+                style="width:85%; padding:10px; background:var(--green); font-weight:bold; cursor:pointer;">SİSTEME
+                BAĞLAN</button>
+        </div>
+    </div>
+
+    <div id="sidebar">
+        <h2 style="color: var(--green); border-bottom: 2px solid var(--green);">YKİ PANELİ</h2>
+        <div class="stat-card" id="hss-card"><small>BÖLGE DURUMU</small><br><b id="hss-text">GÜVENLİ</b></div>
+        <div class="stat-card"><small>HIZ / İRTİFA</small><br><b id="speed">0</b> m/s / <b id="alt">0</b> m</div>
+        <div id="lock-card" class="stat-card">
+            <small>KİLİTLENME (4sn)</small><br><b id="lock">YOK</b>
+            <div id="progress-container">
+                <div id="progress-bar"></div>
+            </div>
+        </div>
+        <div class="stat-card" style="border-left-color: #f59e0b;"><small>MANUEL GEÇİŞ</small><br><b><span
+                    id="man">0</span> / 3</b></div>
+    </div>
+
+    <div id="map">
+        <div id="top-bar">SUNUCU SAATİ: <span id="srv-time">00:00:00:000</span></div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const map = L.map('map').setView([41.51, 36.11], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let myMarker = L.marker([41.51, 36.11]).addTo(map).bindPopup("<b>SAEROTECH İHA</b>");
+        let hssLayers = L.layerGroup().addTo(map);
+        let lockTimer = 0;
+
+        // Uçuş Sınırı Çizimi (Şartname Madde 7.2.2) [cite: 875]
+        L.polygon([[41.515, 36.110], [41.515, 36.125], [41.505, 36.125], [41.505, 36.110]],
+            { color: '#00ff88', weight: 2, fillOpacity: 0.1 }).addTo(map);
+
+        function login() { document.getElementById('login-modal').style.display = 'none'; setInterval(update, 1000); }
+
+        async function update() {
+            try {
+                const res = await fetch('telemetri.json');
+                const data = await res.json();
+
+                // Milisaniye hassasiyetli saat (Madde 6) [cite: 82]
+                const s = data.sunucusaati;
+                document.getElementById('srv-time').innerText = `${s.saat}:${s.dakika}:${s.saniye}:${s.milisaniye}`;
+
+                const myUav = data.konumBilgileri.find(u => u.takim_numarasi === 1);
+                if (myUav) {
+                    document.getElementById('speed').innerText = myUav.iha_hizi || "0.0";
+                    document.getElementById('alt').innerText = myUav.iha_irtifa;
+                    myMarker.setLatLng([myUav.iha_enlem, myUav.iha_boylam]);
+
+                    // Kilitlenme Barı (4sn Kuralı) [cite: 473]
+                    if (myUav.iha_kilitlenme === 1) {
+                        document.getElementById('lock').innerText = "KİLİTLENDİ!";
+                        document.getElementById('progress-container').style.display = 'block';
+                        if (lockTimer < 100) { lockTimer += 25; document.getElementById('progress-bar').style.width = lockTimer + "%"; }
+                    } else {
+                        document.getElementById('lock').innerText = "YOK";
+                        document.getElementById('progress-container').style.display = 'none'; lockTimer = 0;
+                    }
+
+                    // HSS İhlal Kontrolü (Madde 11) [cite: 257, 715]
+                    if (data.hss_koordinat_bilgileri) {
+                        hssLayers.clearLayers();
+                        data.hss_koordinat_bilgileri.forEach(hss => {
+                            L.circle([hss.hssEnlem, hss.hssBoylam], { radius: hss.hssYaricap, color: 'red' }).addTo(hssLayers);
+                            if (map.distance([myUav.iha_enlem, myUav.iha_boylam], [hss.hssEnlem, hss.hssBoylam]) < hss.hssYaricap) {
+                                document.getElementById('hss-card').classList.add('hss-alert');
+                                document.getElementById('hss-text').innerText = "TEHLİKELİ BÖLGE!";
+                            } else {
+                                document.getElementById('hss-card').classList.remove('hss-alert');
+                                document.getElementById('hss-text').innerText = "GÜVENLİ";
+                            }
+                        });
+                    }
+                }
+            } catch (e) { }
+        }
+    </script>
+</body>
+
+</html>

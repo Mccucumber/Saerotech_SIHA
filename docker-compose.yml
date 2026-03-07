@@ -11,3 +11,12 @@ services:
     # Uncomment and optionally bind-mount directories if you need to load/save files 
     # volumes:
     #   - ./log:/root/.ros/log
+
+  web_ui:
+    image: python:3.10-slim
+    container_name: saerotech_ui_container
+    network_mode: host
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: python3 serve_ui.py
