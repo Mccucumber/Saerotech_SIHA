@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SİHA Canlı Simülasyon</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; height: 100%; }
+        #map { height: 100vh; width: 100%; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        // Haritayı SAMSUN merkezli başlatalım ki uçakları görelim!
+        var map = L.map('map').setView([41.50, 36.12], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+        var markers = {}; 
+
+        function verileriCek() {
+            fetch('telemetri.json?' + new Date().getTime())
+                .then(response => response.json())
+                .then(data => {
+                    // DİKKAT: konum_bilgileri yerine konumBilgileri yapıldı
+                    let ihalar = data.konumBilgileri; 
+                    
+                    ihalar.forEach(iha => {
+                        let id = iha.takim_numarasi;
+                        // DİKKAT: IHA_ yerine iha_ (küçük harf) yapıldı
+                        let lat = iha.iha_enlem;  
+                        let lon = iha.iha_boylam; 
+                        let alt = iha.iha_irtifa; 
+                        
+                        if(markers[id]) {
+                            markers[id].setLatLng([lat, lon]);
+                            markers[id].bindPopup("Takım: " + id + "<br>İrtifa: " + alt + " m");
+                        } else {
+                            markers[id] = L.marker([lat, lon]).addTo(map)
+                                .bindPopup("Takım: " + id + "<br>İrtifa: " + alt + " m");
+                        }
+                    });
+                })
+                .catch(err => console.log("Telemetri bekleniyor..."));
+        }
+
+        setInterval(verileriCek, 1000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+# Docker Compose file to easily run the container
+
+services:
+  siha_telemetri:
+    build: .
+    container_name: saerotech_siha_container
+    # Use host network to allow ROS2 nodes to communicate with the host gracefully
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0    # Change if using a different Domain ID
+    # Uncomment and optionally bind-mount directories if you need to load/save files 
+    # volumes:
+    #   - ./log:/root/.ros/log
