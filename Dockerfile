@@ -5,11 +5,13 @@ FROM ros:jazzy-ros-base
 SHELL ["/bin/bash", "-c"]
 
 # Install necessary build tools and Gazebo transport dependencies
-# ros-jazzy-ros-gz is required for the native Python transport in gazebo_visualizer.py
+# ros-jazzy-ros-gz provides the bridge, while python3-gz-* packages provide direct Python bindings
 RUN apt-get update && apt-get install -y \
     python3-colcon-common-extensions \
     python3-pip \
     ros-jazzy-ros-gz \
+    python3-gz-transport13 \
+    python3-gz-msgs10 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set up the workspace
