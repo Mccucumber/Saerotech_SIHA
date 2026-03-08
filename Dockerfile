@@ -4,11 +4,19 @@ FROM ros:jazzy-ros-base
 # Change shell to bash for easier sourcing
 SHELL ["/bin/bash", "-c"]
 
-# Install necessary build tools and Gazebo transport dependencies
-# ros-jazzy-ros-gz provides the bridge, while python3-gz-* packages provide direct Python bindings
+# Install necessary build tools, Gazebo transport dependencies, and keys
 RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
     python3-colcon-common-extensions \
     python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add Gazebo stable repository for direct Python bindings (python3-gz-*)
+RUN wget https://packages.osrfoundation.org/gazebo.gpg -O /usr/share/keyrings/pkgs-osrf-archive-keyring.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/pkgs-osrf-archive-keyring.gpg] http://packages.osrfoundation.org/gazebo/ubuntu-stable $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/gazebo-stable.list > /dev/null
+
+RUN apt-get update && apt-get install -y \
     ros-jazzy-ros-gz \
     python3-gz-transport13 \
     python3-gz-msgs10 \
