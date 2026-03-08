@@ -1,20 +1,39 @@
-# Docker Compose file to easily run the container
-
 services:
-  siha_telemetri:
+  # 1. Harita Node: Core GPS processing
+  harita_node:
     build: .
-    container_name: saerotech_siha_container
-    # Use host network to allow ROS2 nodes to communicate with the host gracefully
+    container_name: siha_harita
     network_mode: host
     environment:
-      - ROS_DOMAIN_ID=0    # Change if using a different Domain ID
-    # Uncomment and optionally bind-mount directories if you need to load/save files 
-    # volumes:
-    #   - ./log:/root/.ros/log
+      - ROS_DOMAIN_ID=0
+    volumes:
+      - .:/ros2_ws/src/siha_telemetri # Bind mount for data persistence
+    command: ros2 run siha_telemetri harita_node
 
+  # 2. NPC Publisher: Simulated drone movement
+  npc_publisher:
+    build: .
+    container_name: siha_publisher
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0
+    command: ros2 run siha_telemetri npc_publisher2
+
+  # 3. Gazebo Visualizer: Syncs with Host Gazebo
+  gazebo_visualizer:
+    build: .
+    container_name: siha_visualizer
+    network_mode: host
+    environment:
+      - ROS_DOMAIN_ID=0
+    volumes:
+      - .:/ros2_ws/src/siha_telemetri
+    command: ros2 run siha_telemetri gazebo_visualizer
+
+  # 4. Web UI: Control Panel
   web_ui:
     image: python:3.10-slim
-    container_name: saerotech_ui_container
+    container_name: siha_web_ui
     network_mode: host
     volumes:
       - .:/app

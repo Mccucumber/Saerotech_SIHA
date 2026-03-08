@@ -5,6 +5,7 @@
     <meta charset="UTF-8">
     <title>SAEROTECH - Yer Kontrol İstasyonu</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw-src.css" />
     <style>
         :root {
             --bg: #0f172a;
@@ -136,20 +137,133 @@
 
     <div id="map">
         <div id="top-bar">SUNUCU SAATİ: <span id="srv-time">00:00:00:000</span></div>
+        <button id="startSimBtn" onclick="startSimulation()"
+            style="display:none; position:absolute; bottom:20px; right:20px; z-index:1000; padding:15px 30px; font-weight:bold; background:var(--green); color:black; border:none; border-radius:8px; cursor:pointer; font-size: 16px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+            SİMÜLASYONU BAŞLAT
+        </button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw-src.js"></script>
     <script>
         const map = L.map('map').setView([41.51, 36.11], 15);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        let myMarker = L.marker([41.51, 36.11]).addTo(map).bindPopup("<b>SAEROTECH İHA</b>");
+        let uavMarkers = {}; // Tüm İHA'ları tutacak obje
         let hssLayers = L.layerGroup().addTo(map);
         let lockTimer = 0;
 
         // Uçuş Sınırı Çizimi (Şartname Madde 7.2.2) [cite: 875]
         L.polygon([[41.515, 36.110], [41.515, 36.125], [41.505, 36.125], [41.505, 36.110]],
             { color: '#00ff88', weight: 2, fillOpacity: 0.1 }).addTo(map);
+
+        // Setup Leaflet Draw
+        let drawnBoundaryLayer = new L.FeatureGroup();
+        let drawnHssLayers = new L.FeatureGroup();
+        map.addLayer(drawnBoundaryLayer);
+        map.addLayer(drawnHssLayers);
+
+        let drawControl = new L.Control.Draw({
+            draw: {
+                polygon: true,
+                rectangle: true,
+                circle: true,
+                polyline: false,
+                marker: false,
+                circlemarker: false
+            },
+            edit: {
+                featureGroup: new L.FeatureGroup([...drawnBoundaryLayer.getLayers(), ...drawnHssLayers.getLayers()]), // Mock featuregroup for edit, simplified handling using events below
+                remove: true
+            }
+        });
+        map.addControl(drawControl);
+
+        // Manual Edit control registration because native 'edit' struggles with separate groups
+        map.on('draw:editstart', function () {
+            drawControl.setDrawingOptions({ edit: { featureGroup: drawnBoundaryLayer } });
+        });
+
+        let currentBoundary = null;
+        let currentHSSList = [];
+
+        map.on(L.Draw.Event.CREATED, function (e) {
+            let type = e.layerType,
+                layer = e.layer;
+
+            if (type === 'polygon' || type === 'rectangle') {
+                drawnBoundaryLayer.clearLayers(); // Sadece bir ana sınır tutalım
+                drawnBoundaryLayer.addLayer(layer);
+
+                let latlngs = layer.getLatLngs()[0]; // İlk halka
+                currentBoundary = latlngs.map(ll => [ll.lat, ll.lng]);
+                document.getElementById('startSimBtn').style.display = 'block';
+            }
+            else if (type === 'circle') {
+                drawnHssLayers.addLayer(layer);
+
+                let hssObj = {
+                    id: currentHSSList.length,
+                    hssEnlem: layer.getLatLng().lat,
+                    hssBoylam: layer.getLatLng().lng,
+                    hssYaricap: layer.getRadius() // metre cinsinden
+                };
+                currentHSSList.push(hssObj);
+
+                // Dinamik HSS guncellemesi (yeni cizildiginde)
+                fetch('/api/hss', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentHSSList)
+                }).catch(err => console.error('HSS guncelleme hatasi:', err));
+            }
+        });
+
+        map.on('draw:deleted', function (e) {
+            // Basitleştirmek için: silinirse her şeyi sıfırlayıp baştan çizmesini isteyebiliriz
+            // ya da array'i boşaltabiliriz. Burada şimdilik backend ile tam senkron tutmak için listeleri temizliyoruz.
+            drawnBoundaryLayer.clearLayers();
+            drawnHssLayers.clearLayers();
+            currentBoundary = null;
+            currentHSSList = [];
+            document.getElementById('startSimBtn').style.display = 'none';
+
+            // Dinamik temizleme
+            fetch('/api/hss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify([])
+            }).catch(err => console.error('HSS temizleme hatasi:', err));
+        });
+
+        async function startSimulation() {
+            if (!currentBoundary) return;
+            try {
+                const response = await fetch('/api/boundary', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ boundary: currentBoundary })
+                });
+
+                if (currentHSSList.length > 0) {
+                    await fetch('/api/hss', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(currentHSSList)
+                    });
+                }
+
+                if (response.ok) {
+                    alert('Simülasyon Başlatıldı! İHA\'lar sahaya iniyor...');
+                    document.getElementById('startSimBtn').style.display = 'none';
+                } else {
+                    alert('Sınır gönderilirken hata oluştu.');
+                }
+            } catch (error) {
+                console.error('Sınır gönderme hatası:', error);
+                alert('Sınır gönderilemedi (sunucu hatası).');
+            }
+        }
 
         function login() { document.getElementById('login-modal').style.display = 'none'; setInterval(update, 1000); }
 
@@ -162,37 +276,51 @@
                 const s = data.sunucusaati;
                 document.getElementById('srv-time').innerText = `${s.saat}:${s.dakika}:${s.saniye}:${s.milisaniye}`;
 
-                const myUav = data.konumBilgileri.find(u => u.takim_numarasi === 1);
-                if (myUav) {
-                    document.getElementById('speed').innerText = myUav.iha_hizi || "0.0";
-                    document.getElementById('alt').innerText = myUav.iha_irtifa;
-                    myMarker.setLatLng([myUav.iha_enlem, myUav.iha_boylam]);
+                // Tüm İHA'ları haritada güncelle
+                data.konumBilgileri.forEach(uav => {
+                    const tid = uav.takim_numarasi;
 
-                    // Kilitlenme Barı (4sn Kuralı) [cite: 473]
-                    if (myUav.iha_kilitlenme === 1) {
-                        document.getElementById('lock').innerText = "KİLİTLENDİ!";
-                        document.getElementById('progress-container').style.display = 'block';
-                        if (lockTimer < 100) { lockTimer += 25; document.getElementById('progress-bar').style.width = lockTimer + "%"; }
+                    // Marker yoksa oluştur
+                    if (!uavMarkers[tid]) {
+                        uavMarkers[tid] = L.marker([uav.iha_enlem, uav.iha_boylam])
+                            .addTo(map)
+                            .bindPopup(`<b>İHA ${tid}</b>`);
                     } else {
-                        document.getElementById('lock').innerText = "YOK";
-                        document.getElementById('progress-container').style.display = 'none'; lockTimer = 0;
+                        // Varsa konumunu güncelle
+                        uavMarkers[tid].setLatLng([uav.iha_enlem, uav.iha_boylam]);
                     }
 
-                    // HSS İhlal Kontrolü (Madde 11) [cite: 257, 715]
-                    if (data.hss_koordinat_bilgileri) {
-                        hssLayers.clearLayers();
-                        data.hss_koordinat_bilgileri.forEach(hss => {
-                            L.circle([hss.hssEnlem, hss.hssBoylam], { radius: hss.hssYaricap, color: 'red' }).addTo(hssLayers);
-                            if (map.distance([myUav.iha_enlem, myUav.iha_boylam], [hss.hssEnlem, hss.hssBoylam]) < hss.hssYaricap) {
-                                document.getElementById('hss-card').classList.add('hss-alert');
-                                document.getElementById('hss-text').innerText = "TEHLİKELİ BÖLGE!";
-                            } else {
-                                document.getElementById('hss-card').classList.remove('hss-alert');
-                                document.getElementById('hss-text').innerText = "GÜVENLİ";
-                            }
-                        });
+                    // Sadece Kendi İHA'mız (Takım 1) için sol paneli güncelle
+                    if (tid === 1) {
+                        document.getElementById('speed').innerText = uav.iha_hiz || "0.0";
+                        document.getElementById('alt').innerText = uav.iha_irtifa;
+
+                        // Kilitlenme Barı (4sn Kuralı)
+                        if (uav.iha_kilitlenme === 1) {
+                            document.getElementById('lock').innerText = "KİLİTLENDİ!";
+                            document.getElementById('progress-container').style.display = 'block';
+                            if (lockTimer < 100) { lockTimer += 25; document.getElementById('progress-bar').style.width = lockTimer + "%"; }
+                        } else {
+                            document.getElementById('lock').innerText = "YOK";
+                            document.getElementById('progress-container').style.display = 'none'; lockTimer = 0;
+                        }
+
+                        // HSS İhlal Kontrolü
+                        if (data.hss_koordinat_bilgileri) {
+                            hssLayers.clearLayers();
+                            data.hss_koordinat_bilgileri.forEach(hss => {
+                                L.circle([hss.hssEnlem, hss.hssBoylam], { radius: hss.hssYaricap, color: 'red' }).addTo(hssLayers);
+                                if (map.distance([uav.iha_enlem, uav.iha_boylam], [hss.hssEnlem, hss.hssBoylam]) < hss.hssYaricap) {
+                                    document.getElementById('hss-card').classList.add('hss-alert');
+                                    document.getElementById('hss-text').innerText = "TEHLİKELİ BÖLGE!";
+                                } else {
+                                    document.getElementById('hss-card').classList.remove('hss-alert');
+                                    document.getElementById('hss-text').innerText = "GÜVENLİ";
+                                }
+                            });
+                        }
                     }
-                }
+                });
             } catch (e) { }
         }
     </script>
